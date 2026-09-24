@@ -1,0 +1,34 @@
+{
+  "_说明": "Codex 中文一键安装器配置。普通用户不用打开这个文件。本安装器不预填任何 key，不内置任何代理。",
+  "installer_version": "1.0.0",
+
+  "node": {
+    "_说明": "只在电脑上没有 Node.js 18 以上时才装（@openai/codex 官方 package.json 写的是 node >=16，这里取 18 留余量）。优先国内镜像，失败再走官方。装在用户自己的目录，不要管理员密码。",
+    "min_major": 18,
+    "fallback_version": "v24.21.0",
+    "mirror_base": "https://npmmirror.com/mirrors/node",
+    "official_base": "https://nodejs.org/dist"
+  },
+
+  "codex": {
+    "_说明": "先用国内 npm 镜像装 OpenAI 官方 npm 包 @openai/codex；失败再用官方安装脚本（2026-09-24 核实：github.com/openai/codex README）。",
+    "npm_package": "@openai/codex",
+    "npm_registry": "https://registry.npmmirror.com",
+    "official_install_sh": "https://chatgpt.com/codex/install.sh",
+    "official_install_ps1": "https://chatgpt.com/codex/install.ps1"
+  },
+
+  "cc_switch": {
+    "_说明": "【可选·默认关】CC Switch（farion1231/cc-switch，MIT）官方 README 写明支持管理 Codex 的供应商配置。Codex 默认用 ChatGPT 账号登录，不需要它；用中转 key 的用户才要。enabled 改成 true 才会装。",
+    "enabled": false,
+    "github_repo": "farion1231/cc-switch",
+    "fallback_version": "v3.20.4",
+    "extra_download_base": ""
+  },
+
+  "shortcuts": {
+    "codex_name": "打开 Codex",
+    "ccswitch_name": "CC Switch 切换 key",
+    "workspace_dir_name": "Codex工作区"
+  }
+}

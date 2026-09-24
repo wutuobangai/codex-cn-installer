@@ -1,0 +1,139 @@
+# ============================================================
+# Codex 中文一键安装器 · 云端真机测试（Windows + macOS）
+# 手动触发（workflow_dispatch），不会自动跑。
+# GitHub 的 windows-latest / macos-latest 是一次性虚拟机，真装不会影响任何人的电脑。
+# 只测「装得上 + 桌面图标对 + codex --version 能跑」，不登录、不调用任何付费接口。
+# ============================================================
+name: installer-test
+
+on:
+  workflow_dispatch:
+
+env:
+  INSTALLER_DIR: codex-installer
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        # 测试步骤用 pwsh（能正确读取本文件里的中文）；安装器本身仍由 双击安装.bat 调 Windows PowerShell 5.1 执行，和普通用户电脑一致
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 1) install.ps1 语法检查 + 必须是 UTF-8 带 BOM
+        run: |
+          $f = "$env:GITHUB_WORKSPACE\$env:INSTALLER_DIR\installer-files\install.ps1"
+          $b = [IO.File]::ReadAllBytes($f)
+          if (-not ($b[0] -eq 0xEF -and $b[1] -eq 0xBB -and $b[2] -eq 0xBF)) { Write-Host "install.ps1 没有 UTF-8 BOM"; exit 1 }
+          $errs = $null
+          [System.Management.Automation.Language.Parser]::ParseFile($f, [ref]$null, [ref]$errs) | Out-Null
+          if ($errs.Count -gt 0) { $errs | ForEach-Object { Write-Host $_ }; exit 1 }
+          # 再用 Windows PowerShell 5.1 自己的解析器查一遍（用户电脑上就是它在跑）
+          powershell.exe -NoProfile -Command "`$e=`$null; [System.Management.Automation.Language.Parser]::ParseFile('$f',[ref]`$null,[ref]`$e) | Out-Null; if (`$e.Count -gt 0) { `$e; exit 1 }"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Write-Host "PARSE_OK"
+
+      - name: 2) 演练模式（-DryRun -PretendFresh）：必须 0 退出，且不能在桌面留下任何东西
+        run: |
+          $desk = [Environment]::GetFolderPath('Desktop')
+          $before = @(Get-ChildItem $desk -Force -ErrorAction SilentlyContinue).Count
+          Set-Location "$env:GITHUB_WORKSPACE\$env:INSTALLER_DIR"
+          cmd /c ".\双击安装.bat" -DryRun -PretendFresh -NoPause
+          if ($LASTEXITCODE -ne 0) { Write-Host "dry-run exit=$LASTEXITCODE"; exit 1 }
+          $after = @(Get-ChildItem $desk -Force -ErrorAction SilentlyContinue).Count
+          if ($after -ne $before) { Write-Host "dry-run 改动了桌面！ before=$before after=$after"; exit 1 }
+          Write-Host "DRYRUN_OK"
+
+      - name: 3) 真装（-PretendFresh：忽略 runner 自带的 Node，走完整流程）
+        run: |
+          Set-Location "$env:GITHUB_WORKSPACE\$env:INSTALLER_DIR"
+          cmd /c ".\双击安装.bat" -PretendFresh -NoPause
+          if ($LASTEXITCODE -ne 0) { Write-Host "install exit=$LASTEXITCODE"; exit 1 }
+
+      - name: 4) 检查：桌面快捷方式存在、里面写的 codex 路径真实存在、codex --version 能跑
+        run: |
+          $desk = [Environment]::GetFolderPath('Desktop')
+          $sh = New-Object -ComObject WScript.Shell
+          $l1 = Join-Path $desk '打开 Codex.lnk'
+          if (-not (Test-Path -LiteralPath $l1)) { Write-Host "缺快捷方式：$l1"; Get-ChildItem $desk | Out-String | Write-Host; exit 1 }
+          # 老式 WScript.Shell 读不了中文文件名 → 先复制成英文临时名再读
+          $tmp = Join-Path $env:TEMP ('rd-' + [guid]::NewGuid().ToString('N') + '.lnk')
+          Copy-Item -LiteralPath $l1 -Destination $tmp -Force
+          $t1 = $sh.CreateShortcut($tmp)
+          Write-Host "Codex 快捷方式 → $($t1.TargetPath) $($t1.Arguments)"
+          Write-Host "工作目录 → $($t1.WorkingDirectory)"
+          if (-not (Test-Path -LiteralPath $t1.WorkingDirectory)) { Write-Host "工作文件夹不存在"; exit 1 }
+          if ($t1.Arguments -match "& '([^']+)'") {
+            $p = $Matches[1]
+            if (-not (Test-Path -LiteralPath $p)) { Write-Host "快捷方式里的 codex 路径不存在：$p"; exit 1 }
+            & $p --version
+            if ($LASTEXITCODE -ne 0) { Write-Host "快捷方式里的 codex 跑不起来"; exit 1 }
+          } else { Write-Host "快捷方式参数里没找到 codex 路径"; exit 1 }
+          # 从用户 PATH 重新加载后找 codex（模拟用户新开窗口）
+          $env:Path = [Environment]::GetEnvironmentVariable('Path','User') + ';' + [Environment]::GetEnvironmentVariable('Path','Machine')
+          $c = (Get-Command codex.cmd, codex.exe -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+          if (-not $c) { Write-Host "新窗口里找不到 codex"; exit 1 }
+          & $c --version
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Write-Host "SHORTCUTS_OK"
+
+      - name: 5) 再双击一次（不带 -PretendFresh）：全部应显示「跳过」，不重复装
+        run: |
+          Set-Location "$env:GITHUB_WORKSPACE\$env:INSTALLER_DIR"
+          $out = cmd /c ".\双击安装.bat" -NoPause 2>&1 | Out-String
+          Write-Host $out
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $skips = ([regex]::Matches($out, '跳过')).Count
+          Write-Host "跳过次数=$skips"
+          if ($skips -lt 3) { Write-Host "第二次运行应至少 3 处跳过（Node / Codex / 桌面图标）"; exit 1 }
+
+      - name: 上传安装日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-install-log
+          path: C:\Users\runneradmin\AppData\Local\Codex中文安装器.log
+          if-no-files-found: warn
+
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: 语法检查
+        run: bash -n "$INSTALLER_DIR/双击安装.command"
+      - name: 演练模式（桌面不能多东西）
+        run: |
+          mkdir -p "$HOME/Desktop"; before=$(ls -A "$HOME/Desktop" | wc -l)
+          bash "$INSTALLER_DIR/双击安装.command" --dry-run --pretend-fresh --no-pause
+          after=$(ls -A "$HOME/Desktop" | wc -l)
+          [ "$before" = "$after" ] || { echo "dry-run 改动了桌面"; exit 1; }
+      - name: 真装（一次性虚拟机）
+        run: bash "$INSTALLER_DIR/双击安装.command" --pretend-fresh --no-pause
+      - name: 检查桌面图标 + codex 能跑
+        run: |
+          F="$HOME/Desktop/打开 Codex.command"
+          test -x "$F"
+          cat "$F"
+          BIN="$(sed -n 's/^CODEX_BIN="\(.*\)"$/\1/p' "$F" | head -1)"
+          echo "快捷方式里的 codex：$BIN"
+          test -x "$BIN"
+          "$BIN" --version
+          "$HOME/.local/bin/codex" --version
+          test -d "$HOME/Codex工作区"
+          echo SHORTCUTS_OK
+      - name: 再跑一次：应全部跳过
+        run: |
+          out="$(bash "$INSTALLER_DIR/双击安装.command" --no-pause 2>&1)"; echo "$out"
+          n=$(printf '%s' "$out" | grep -o '跳过' | wc -l | tr -d ' ')
+          echo "跳过次数=$n"; [ "$n" -ge 3 ] || exit 1
+      - name: 上传安装日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-install-log
+          path: ~/Library/Logs/Codex中文安装器.log
+          if-no-files-found: warn
