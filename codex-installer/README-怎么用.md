@@ -55,6 +55,7 @@ Codex 默认用 ChatGPT 账号登录，不需要它；桌面多一个图标对�
 - npm 新版会拦安装后脚本：命令带 `--allow-scripts=@openai/codex`（Codex 目前没有安装脚本，只为以后加了不出事）
 - 桌面文件夹不存在：两个系统都先建再放图标
 - 中文名快捷方式：先存英文临时名再改名，`.lnk` 真存在才报成功；测试脚本回读 `.lnk` 也先复制成英文名
+- **.lnk 里只放英文字符**（9-24 云端英文 Windows 实测：WScript.Shell 按系统代码页存 Arguments/WorkingDirectory，中文全变 `???`）：快捷方式 = `powershell.exe -File "%LOCALAPPDATA%\Programs\lingji-codex\open-codex.ps1"`，中文提示、进「Codex工作区」、运行 codex 都写在这个 UTF-8 带 BOM 的启动脚本里；存完回读参数不一致就不算成功；用户名是中文时用 8.3 短路径，再不行退到 `C:\Users\Public\lingji-codex-*`
 - Windows 测试步骤用 `shell: pwsh`
 - Mac 脚本里 `$变量` 后面紧跟中文会被 bash 吞变量名：一律写 `${变量}`（本次 DryRun 当场抓到一处，已修）
 - 演练模式和「已装过」分支都**不运行** codex（只报路径），真装才跑 `codex --version`
